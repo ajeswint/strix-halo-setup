@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Reproduces the torch env as built 2026-10-04 (default target /data/envs/torch).
 # AMD ROCm 10.0.0 gfx1151 wheels (bundled user-space ROCm runtime) + HF training stack.
-# Usage: install-torch-env.sh [target-dir]
+# Usage: install-torch-env.sh [target-dir]   (target must not exist; one-shot, not re-runnable)
 set -euo pipefail
 TARGET="${1:-/data/envs/torch}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 AMD=https://stable.repo.amd.com/rocm/whl-next/
+
+[ ! -e "$TARGET" ] || { echo "ERROR: $TARGET exists; remove it or pass a new path" >&2; exit 1; }
 
 "$UV" venv --python /usr/bin/python3.14 "$TARGET"
 "$UV" pip install --python "$TARGET/bin/python" \
