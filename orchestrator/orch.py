@@ -19,6 +19,7 @@ HERE = Path(__file__).resolve().parent
 MAX_DIFF_CHARS = 100_000     # ~30k tokens; leaves room in the 64k context for context, memory, reasoning
 MAX_FILE_DIFF_CHARS = 20_000  # bigger per-file diffs (logs, jsonl, lockfiles) are listed, not included
 MAX_CONTEXT_CHARS = 24_000    # README + CLAUDE.md
+SAMPLE_LINES, SAMPLE_LINE_CHARS = 3, 1500  # head sample of each file too large to diff
 MEMORY_LIMIT = 30
 REASONING_BUDGET = 6144      # server forces end-of-thinking here (llama.cpp reasoning_budget_tokens)
 MAX_TOKENS = 12288           # reasoning + JSON answer; 8192 with no budget ran out mid-reasoning (run 1)
@@ -73,7 +74,13 @@ def build_diff(repo, base, head):
     for f in files:
         d = git(repo, "diff", base, head, "--", f)
         if len(d) > MAX_FILE_DIFF_CHARS:
-            skipped.append(f"{f} ({len(d)} chars)")
+            # Show the data's shape so code that writes or reads it isn't judged blind (run 2 false positives).
+            try:
+                head_lines = git(repo, "show", f"{head}:{f}").splitlines()[:SAMPLE_LINES]
+            except subprocess.CalledProcessError:
+                head_lines = []
+            sample = "".join(f"\n    | {l[:SAMPLE_LINE_CHARS]}" for l in head_lines)
+            skipped.append(f"{f} ({len(d)} chars); first lines at HEAD:{sample}" if sample else f"{f} ({len(d)} chars)")
         elif total + len(d) > MAX_DIFF_CHARS:
             skipped.append(f"{f} (diff budget exhausted)")
             truncated = True
@@ -81,7 +88,8 @@ def build_diff(repo, base, head):
             parts.append(d)
             total += len(d)
     if skipped:
-        parts.append("Not included (too large to review):\n" + "\n".join("  " + s for s in skipped))
+        parts.append("Not included (too large to diff; do not guess at their contents beyond the sample):\n"
+                     + "\n".join("  " + s for s in skipped))
     return "\n".join(parts), total, truncated, files
 
 
