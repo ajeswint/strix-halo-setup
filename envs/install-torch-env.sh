@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reproduces the torch env as built 2026-10-04 (default target /data/envs/torch).
+# Builds an equivalent of the torch env set up 2026-10-04 (default target /data/envs/torch); see README for live-vs-freeze deltas.
 # AMD ROCm 10.0.0 gfx1151 wheels (bundled user-space ROCm runtime) + HF training stack.
 # Usage: install-torch-env.sh [target-dir]   (target must not exist; one-shot, not re-runnable)
 set -euo pipefail
