@@ -75,9 +75,13 @@ python3 orchestrator/orch.py runs
 - Output is schema-constrained JSON (`response_format.type = json_schema`, nested `json_schema.schema`, which is what this llama.cpp build reads). Reasoning is capped per request with `reasoning_budget_tokens` 6144 inside `max_tokens` 12288. Without a cap, run 1 spent all 8,192 tokens reasoning and returned no answer.
 - Findings are de-duplicated by file + normalised title. Accepted/rejected verdicts with reasons go back into the next prompt.
 - Skips (no new commits, server down) exit 0 and are logged as `skipped` runs. Errors exit 1 and keep the raw response.
-- `systemd/user/orch-review.{service,timer}` runs it hourly as a user unit. Linger is off, so it runs while you're logged in (screen lock is fine), not after a logged-out boot.
+- `systemd/user/orch-review.{service,timer}` would run it hourly as a user unit. NOT installed: held until a review produces a finding worth keeping. To install:
+  ```
+  mkdir -p ~/.config/systemd/user && ln -sf ~/projects/strix-halo-setup/systemd/user/orch-review.service ~/projects/strix-halo-setup/systemd/user/orch-review.timer ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user enable --now orch-review.timer
+  ```
+  Linger is off, so it would run while you're logged in (screen lock is fine), not after a logged-out boot.
 
-First full review (run 2): 18,644 prompt tokens, 6,489 generated, 534 s. All three findings were false positives (rejected #1-#3 with reasons).
+First full review (run 2): 18,644 prompt tokens, 6,489 generated, 534 s. All three findings were false positives (rejected #1-#3 with reasons): the model judged `bench.sh`'s JSONL writer with `results.jsonl` omitted. Run 3 (two small commits, 5,313 prompt tokens, 415 s): 0 findings, but it missed a real doc error (this section claimed the timer was running). Only 138 tokens came from cache because README.md, which sits early in the prompt, changed in those commits. Every run so far used the full 6,144-token reasoning budget, so a review costs ~7 min of GPU regardless of diff size.
 
 ## Roadmap
 
