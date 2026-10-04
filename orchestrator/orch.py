@@ -20,6 +20,8 @@ MAX_DIFF_CHARS = 100_000     # ~30k tokens; leaves room in the 64k context for c
 MAX_FILE_DIFF_CHARS = 20_000  # bigger per-file diffs (logs, jsonl, lockfiles) are listed, not included
 MAX_CONTEXT_CHARS = 24_000    # README + CLAUDE.md
 MEMORY_LIMIT = 30
+REASONING_BUDGET = 6144      # server forces end-of-thinking here (llama.cpp reasoning_budget_tokens)
+MAX_TOKENS = 12288           # reasoning + JSON answer; 8192 with no budget ran out mid-reasoning (run 1)
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 SYSTEM = """You are an adversarial code reviewer for a single-developer repository.
@@ -108,7 +110,9 @@ def memory(db, repo_id, files):
 
 
 def chat(messages):
-    body = {"model": MODEL, "messages": messages, "temperature": 0.2, "max_tokens": 8192,
+    body = {"model": MODEL, "messages": messages, "temperature": 0.2, "max_tokens": MAX_TOKENS,
+            "reasoning_budget_tokens": REASONING_BUDGET,
+            "reasoning_budget_message": "Reasoning budget reached. Write the JSON answer now.",
             "response_format": {"type": "json_schema", "json_schema": {"name": "review", "schema": SCHEMA}}}
     req = urllib.request.Request(f"{API}/v1/chat/completions", json.dumps(body).encode(),
                                  {"Content-Type": "application/json"})
@@ -161,14 +165,19 @@ def cmd_review(a):
             f"===== Past verdicts =====\n{memory(db, r['id'], files)}\n\n"
             f"===== Commits under review =====\n{log}\n\n===== Diff =====\n{diff}")
     t = time.time()
+    resp = None
     try:
         resp = chat([{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}])
-        content = resp["choices"][0]["message"]["content"]
+        choice = resp["choices"][0]
+        content = choice["message"]["content"]
         found = json.loads(content)["findings"]
     except Exception as e:
-        finish(db, run_id, "error", f"{type(e).__name__}: {e}", seconds=round(time.time() - t, 1),
-               diff_chars=chars, truncated=int(truncated))
-        sys.exit(f"error: {e}")
+        note = f"{type(e).__name__}: {e}"
+        if resp:
+            note += f" (finish_reason={resp['choices'][0].get('finish_reason')})"
+        finish(db, run_id, "error", note, seconds=round(time.time() - t, 1), diff_chars=chars,
+               truncated=int(truncated), raw_response=json.dumps(resp) if resp else None)
+        sys.exit(f"error: {note}")
     u = resp.get("usage", {})
     new = 0
     with db:
