@@ -1,5 +1,7 @@
 # strix-halo-setup
 
+> **ARCHIVED 2026-10-04.** Setup is complete: install, tuning, firewall. The live files still match the copies here. Work continues in **strix-halo-lab** (orchestrator, small-model loop, LoRA, Resolve, hardware research = the Roadmap below). Open item carried over: check the silkscreen at the fan plug (see *Why the fan is pegged*). This repo is read-only history.
+
 Configuration, benchmarks and decisions for a Framework Desktop (Ryzen AI Max+ 395 / Strix Halo, Radeon 8060S gfx1151, 128 GB unified LPDDR5X) used as a local LLM box. Everything here is a copy of the live file on the machine; paths in the tree mirror where the file lives.
 
 ## Hardware
@@ -20,12 +22,20 @@ Configuration, benchmarks and decisions for a Framework Desktop (Ryzen AI Max+ 3
 | Cooling | `systemd/fan-peg.service`: `framework_tool --fansetduty 100` at boot and after resume. See *Why the fan is pegged*. |
 | llama.cpp | `/data/src/llama.cpp` HEAD 836d57176, `build-hip` (gfx1151) and `build-vk`; `etc/ld.so.conf.d/rocm.conf` puts the HIP libs on the linker path |
 | Serving | `systemd/llama-deepseek.service`: DeepSeek V4 Flash UD-IQ2_M, HIP, 64k context, `127.0.0.1:8080`, alias `deepseek-v4-flash`. Started manually, not enabled at boot (pins ~85 GiB GTT). |
-| Models | `/data/models`: Qwen3.6-35B-A3B UD-Q4_K_XL, DeepSeek V4 Flash 0731 UD-IQ2_M (3 shards). `models/fetch.sh` + `systemd/model-download.service` (disabled, download complete). |
+| Models | `/data/models`: Qwen3.6-35B-A3B UD-Q4_K_XL, DeepSeek V4 Flash 0731 UD-IQ2_M (3 shards), Laguna XS 2.1 Q4_K_M (bartowski, 20.55 GB, sha256 `239b1417…3491dae6` verified 2026-10-04; second small model for the loop, not yet run). `models/fetch.sh` + `systemd/model-download.service` (disabled, download complete). |
 | Python / training | `/data/envs/torch`: uv venv on system Python 3.14.4. torch 2.13.0+rocm10.0.0 via `torch[device-gfx1151]` from `stable.repo.amd.com/rocm/whl-next/` (bundles its own ROCm user-space runtime; nothing loads from `/opt/rocm`), transformers 5.18.0, peft 0.21.2, trl 1.14.1, datasets 5.0.1, accelerate 1.15.0. `envs/install-torch-env.sh [target-dir]` builds an equivalent env (default `/data/envs/torch`; one-shot, refuses an existing target; validated 2026-10-04 into an empty scratch dir). `envs/freeze.txt` is that fresh install's package list, not the live env's. Live differs: three orphans (`tyro`, `typeguard`, `docstring-parser`) from the first resolver backtrack, and newer transitive versions from a later `--upgrade` (filelock 4.0.10 vs 3.32.3, rocm-bootstrap 0.3.0 vs 0.1.0, setuptools 84 vs 81, numpy 2.5.3 vs 2.5.2, networkx 3.7 vs 3.6.1, markupsafe 3.0.4 vs 3.0.3). The torch/transformers/peft/trl/datasets/accelerate versions are identical in both. `HF_HOME=/data/hf-cache`. |
-| Tooling | uv, gh, git-lfs, podman (rootless) + distrobox, sqlite3, tmux, btop, nvtop, aria2, fd-find |
+| Tooling | uv, gh, git-lfs, podman (rootless) + distrobox, sqlite3, tmux, btop, nvtop, aria2, fd-find, vulkan-tools |
+| Firewall | ufw active: deny incoming, allow outgoing; one rule, RDP 3389/tcp from 192.168.50.0/24. Copy in `etc/ufw/user.rules`. |
 | Cursor | AppArmor adjustments in `etc/apparmor.d/` so Cursor's terminal sandbox runs under Ubuntu's user-namespace restriction. Keep the local conffile on Cursor updates. |
 
 Not installed, by decision: Docker (podman instead), Postgres (SQLite, see below), Unsloth (would need Python 3.10-3.13 and its own torch; separate env if ever), bitsandbytes.
+
+## Security (2026-10-04)
+
+- **Firewall:** ufw enabled 2026-10-04 (it was installed but inactive). Rules match the ports in use "for now": the LAN gets full access to RDP (3389/tcp from 192.168.50.0/24), everything else inbound is dropped. mDNS and DHCP replies pass via ufw's stock `before.rules`. CUPS (631), DNS stub (53) and llama-server (8080) listen on loopback only. Add a rule when a new LAN service is added.
+- **Disk encryption: none, by decision.** Neither drive is encrypted; the performance cost was judged not worth it. Physical access to the box = access to the data.
+- **In place:** Secure Boot on, unattended-upgrades on, no SSH server. Cursor's AppArmor profile is unconfined by design (see Cursor row).
+- **Memory exhaustion is not guarded by the system.** 2026-10-04 18:16: `llama-perplexity` (Qwen, ~22 GB) was started while `llama-deepseek.service` held ~85 GiB GTT. Swap hit 0, the kernel OOM killer fired once and killed Cursor (0.4 GB, `oom_score_adj` 300) instead of either llama process, then kworkers blocked >120 s and the journal stops; reboot required. systemd-oomd logged nothing. Rule: before loading any model, check `free -g`, GTT used and `systemctl is-active llama-deepseek`; never load beside the DeepSeek server.
 
 ## Why the fan is pegged
 
@@ -88,5 +98,5 @@ First full review (run 2): 18,644 prompt tokens, 6,489 generated, 534 s. All thr
 1. Orchestrator + SQLite memory: structured verdicts (finding, file, severity, accepted/rejected + reason) retrieved into prompts. DeepSeek as an hourly adversarial reviewer of diffs; static system/rules/repo summary first in the prompt, changing material last, for cache hits.
 2. Small-model loop: Qwen3.6-35B-A3B made strong via tools, tests and best-of-N, with DeepSeek as judge. Tests and compiler outrank the judge.
 3. One timed LoRA job, kept only if it beats the base model on held-out tasks. Verdicts are not training pairs; a dataset has to be built. Risks: model collapse, bad judge.
-4. DaVinci Resolve Studio in a container (pending: licence type, distrobox vs davincibox).
+4. DaVinci Resolve Studio in a container: davincibox chosen; licence type and install deferred.
 5. Server-class hardware research, criterion bandwidth per dollar with confirmed software support.
